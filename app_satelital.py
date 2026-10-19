@@ -4,6 +4,7 @@ from rasterio.mask import mask
 import geopandas as gpd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
@@ -13,6 +14,7 @@ import tempfile
 import os
 import glob
 from datetime import datetime
+import textwrap
 import warnings
 
 # Silenciar advertencias matemáticas al promediar celdas NaN
@@ -102,7 +104,6 @@ if meses_seleccionados:
     if tiene_b4 and not tiene_b5: mapas_disponibles.append("Reflectancia Superficial Banda 4 (Rojo)")
     if tiene_b5 and not tiene_b4: mapas_disponibles.append("Reflectancia Superficial Banda 5 (NIR)")
     
-    # Agregar las bandas "Otras" al menú
     nombres_otras = set()
     for m in meses_seleccionados:
         for f in coleccion_temporal[m]["Otras"]:
@@ -253,7 +254,6 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
 
         bounds, crs_actual, gdf_utm = None, None, None
 
-        # Bloque de pre-cálculo condicional
         if any(m in mapa_seleccionado for m in ["LST", "UTFVI", "STD", "UTVI"]):
             lst_c, bounds, crs_actual, gdf_utm = procesar_promedio(archivos_b10, 0.00341802, 149.0 - 273.15, gdf_mascara)
             lst_mean = float(np.nanmean(lst_c))
@@ -273,7 +273,6 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
             denom = rho_b5 + rho_b4
             ndvi = np.clip(np.where(denom != 0, (rho_b5 - rho_b4) / denom, np.nan), -1.0, 1.0)
 
-        # Asignación final a las variables de dibujado
         if mapa_seleccionado.startswith("LST"):
             matriz_final, cmap, unidad = lst_c, "Spectral_r", "°C"
         elif mapa_seleccionado.startswith("UTFVI"):
@@ -308,7 +307,7 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
         c4.metric("Máximo", f"{np.nanmax(matriz_final):.3f}")
 
         # --- GRAFICADO ---
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(10, 10))
         extent = [bounds[0], bounds[2], bounds[1], bounds[3]]
         matriz_masked = np.ma.masked_invalid(matriz_final)
 
@@ -320,17 +319,70 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
             norm_disc = BoundaryNorm(np.arange(-0.5, len(colores) + 0.5, 1), cmap_disc.N)
             
             im = ax.imshow(clases_masked, cmap=cmap_disc, norm=norm_disc, extent=extent, interpolation="nearest", alpha=transparencia, zorder=2)
-            parches = [Patch(facecolor=c, edgecolor="black", label=l) for c, l in zip(colores, etiquetas)]
-            ax.legend(handles=parches, loc="lower right", title="Clasificación [Área %]", frameon=True, facecolor="white", framealpha=0.9, fontsize=8.5)
+            parches_leg = [Patch(facecolor=c, edgecolor="black", label=l) for c, l in zip(colores, etiquetas)]
+            ax.legend(handles=parches_leg, loc="lower right", title="Clasificación [Área %]", frameon=True, facecolor="white", framealpha=0.9, fontsize=8.5)
         else:
             cmap_cont = plt.get_cmap(cmap).copy()
             cmap_cont.set_bad(color="none", alpha=0)
             im = ax.imshow(matriz_masked, cmap=cmap_cont, extent=extent, vmin=np.nanmin(matriz_final), vmax=np.nanmax(matriz_final), alpha=transparencia, zorder=2)
-            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=unidad)
+            
+            # --- CAJETÍN CARTOGRÁFICO FLOTANTE ---
+            cajetin = patches.Rectangle((0.60, 0.02), 0.38, 0.175, transform=ax.transAxes,
+                                        facecolor="#fffff5", edgecolor="black", linewidth=0.8, zorder=8)
+            ax.add_patch(cajetin)
 
-        gdf_utm.boundary.plot(ax=ax, color="black", linewidth=0.8, alpha=0.8, zorder=3)
+            ax.plot([0.60, 0.98], [0.092, 0.092], transform=ax.transAxes, color="black", linewidth=0.8, zorder=9)
+            ax.plot([0.80, 0.80], [0.092, 0.195], transform=ax.transAxes, color="black", linewidth=0.8, zorder=9)
+
+            # --- TÍTULO MULTILÍNEA ---
+            titulo_cajetin = mapa_seleccionado.split(" - ")[0]
+            titulo_multilinea = textwrap.fill(f"{titulo_cajetin} ({unidad})", width=22)
+            ax.text(0.61, 0.185, titulo_multilinea, transform=ax.transAxes, fontsize=5.0, fontweight="bold", va="top", zorder=10)
+            
+            # --- PALETA SUBIDA (0.100) ---
+            pal_y = 0.100
+            pal_h = 0.040
+            step_h = pal_h / 64
+            for i in range(64):
+                color_paso = cmap_cont(i / 63.0)
+                rect_pal = patches.Rectangle((0.61, pal_y + i * step_h), 0.02, step_h,
+                                             transform=ax.transAxes, facecolor=color_paso, edgecolor="none", zorder=9)
+                ax.add_patch(rect_pal)
+            
+            ax.add_patch(patches.Rectangle((0.61, pal_y), 0.02, pal_h, transform=ax.transAxes,
+                                           facecolor="none", edgecolor="black", linewidth=0.5, zorder=10))
+
+            ax.text(0.64, pal_y + pal_h - 0.005, f"Max:  {np.nanmax(matriz_final):.2f}", transform=ax.transAxes, fontsize=5.0, zorder=10)
+            ax.text(0.64, pal_y + (pal_h/2) - 0.002, f"Mean: {np.nanmean(matriz_final):.2f}", transform=ax.transAxes, fontsize=5.0, zorder=10)
+            ax.text(0.64, pal_y - 0.002, f"Min:  {np.nanmin(matriz_final):.2f}", transform=ax.transAxes, fontsize=5.0, zorder=10)
+
+            ax.text(0.81, 0.165, "AGEB_LMM", transform=ax.transAxes, fontsize=5.0, fontweight="bold", zorder=10)
+            ax.add_patch(patches.Rectangle((0.81, 0.135), 0.022, 0.018, transform=ax.transAxes,
+                                           facecolor="white", edgecolor="black", linewidth=0.5, zorder=10))
+            ax.text(0.81, 0.115, "Los Mochis Urban Area", transform=ax.transAxes, fontsize=5.0, zorder=10)
+            ax.text(0.81, 0.098, "(56.7 km²)", transform=ax.transAxes, fontsize=5.0, zorder=10)
+
+            ax.text(0.61, 0.07, "SCALE   1:26,000", transform=ax.transAxes, fontsize=5.0, fontweight="bold", zorder=10)
+            w_escala = [0.028, 0.028, 0.056, 0.056, 0.056]
+            c_escala = ["black", "white", "black", "white", "black"]
+            lbl_escala = ["0", "0.5", "1", "2", "3", "4"]
+            
+            y_bar = 0.045
+            curr_x = 0.61
+            ax.text(curr_x, y_bar - 0.015, lbl_escala[0], transform=ax.transAxes, fontsize=5.0, ha="center", zorder=10)
+            
+            for i, (w, c) in enumerate(zip(w_escala, c_escala)):
+                ax.add_patch(patches.Rectangle((curr_x, y_bar), w, 0.008, transform=ax.transAxes,
+                                               facecolor=c, edgecolor="black", linewidth=0.5, zorder=10))
+                curr_x += w
+                ax.text(curr_x, y_bar - 0.015, lbl_escala[i+1], transform=ax.transAxes, fontsize=5.0, ha="center", zorder=10)
+            
+            ax.text(curr_x + 0.01, y_bar, "Kilometers", transform=ax.transAxes, fontsize=5.0, zorder=10)
+
+        # --- DIBUJADO DE POLÍGONO FINO ---
+        gdf_utm.boundary.plot(ax=ax, color="black", linewidth=0.25, alpha=0.8, zorder=3)
         
-        # Mapa base actualizado a Esri Claro (Canvas) en lugar de CartoDB
+        # --- MAPA BASE CONTEXTILY ---
         if mapa_base != "Ninguno":
             if mapa_base == "Esri Topográfico (Calles)":
                 proveedor = cx.providers.Esri.WorldTopoMap
@@ -342,17 +394,31 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
             try: cx.add_basemap(ax, crs=crs_actual, source=proveedor, attribution=False, zorder=1)
             except: st.warning("No se pudo cargar la capa base de internet.")
 
-        ax.set_xlim(bounds[0], bounds[2])
-        ax.set_ylim(bounds[1], bounds[3])
+        # --- LÍMITES CON MARGEN DINÁMICO (PADDING) ---
+        margen_x = (bounds[2] - bounds[0]) * 0.08
+        margen_y = (bounds[3] - bounds[1]) * 0.08
+        ax.set_xlim(bounds[0] - margen_x, bounds[2] + margen_x)
+        ax.set_ylim(bounds[1] - margen_y, bounds[3] + margen_y)
 
-        # --- TÍTULO DINÁMICO DE RANGO DE FECHAS ---
+        # --- CUADRÍCULA Y FLECHA NORTE ---
+        ax.grid(True, color='gray', linestyle='-', linewidth=0.3, alpha=0.5, zorder=0)
+        
+        ax.annotate('', xy=(0.96, 0.96), xytext=(0.96, 0.89),
+                    arrowprops=dict(facecolor='black', width=3, headwidth=9),
+                    xycoords='axes fraction', zorder=10)
+        ax.text(0.96, 0.86, 'N', transform=ax.transAxes, fontsize=12, fontweight='bold', ha='center', zorder=10)
+
+        # --- TÍTULOS Y ETIQUETAS ---
         if len(meses_seleccionados) == 1:
             texto_fecha = meses_seleccionados[0]
         else:
             seleccion_ordenada = sorted(meses_seleccionados, key=lambda x: orden_fechas[x])
             texto_fecha = f"Promedio ({seleccion_ordenada[0]} - {seleccion_ordenada[-1]})"
             
-        ax.set_title(f"{mapa_seleccionado}\n{texto_fecha}", fontsize=14, fontweight="bold", pad=12)
+        ax.set_title(f"{mapa_seleccionado}\n{texto_fecha}", fontsize=16, fontweight="bold", pad=15)
+        ax.set_xlabel("Geodetic longitude [degree]", fontsize=9)
+        ax.set_ylabel("Geodetic latitude [degree]", fontsize=9)
+        
         formatear_ejes_coordenadas(ax, bounds, crs_actual, formato_coord)
 
         st.pyplot(fig)
