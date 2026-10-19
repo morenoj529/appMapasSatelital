@@ -241,7 +241,7 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
     formato_coord = st.sidebar.selectbox("Formato de coordenadas en bordes:", ["Geográficas (Grados° Minutos')", "Geográficas (Grados Decimales)", "UTM (Metros - Zona 12N)"])
 
     st.sidebar.header("5. Capa Base y Diseño")
-    mapa_base = st.sidebar.selectbox("Fondo de mapa (Contextily):", ["Esri Topográfico (Calles)", "Esri Satelital", "CartoDB Positron (Claro)", "Ninguno"])
+    mapa_base = st.sidebar.selectbox("Fondo de mapa (Contextily):", ["Esri Topográfico (Calles)", "Esri Satelital", "Esri Claro (Canvas)", "Ninguno"])
     transparencia = st.sidebar.slider("Transparencia del raster generado (Alpha):", 0.1, 1.0, 0.85)
 
     texto_accion = "Procesando escena de" if len(meses_seleccionados) == 1 else "Calculando promedio de"
@@ -273,7 +273,7 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
             denom = rho_b5 + rho_b4
             ndvi = np.clip(np.where(denom != 0, (rho_b5 - rho_b4) / denom, np.nan), -1.0, 1.0)
 
-        # Asignación final a las variables de dibujado (ESTO PREVIENE EL ERROR)
+        # Asignación final a las variables de dibujado
         if mapa_seleccionado.startswith("LST"):
             matriz_final, cmap, unidad = lst_c, "Spectral_r", "°C"
         elif mapa_seleccionado.startswith("UTFVI"):
@@ -295,7 +295,6 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
         elif "Banda 5" in mapa_seleccionado:
             matriz_final, cmap, unidad = rho_b5, "Greens", "Reflectancia"
         else:
-            # Para cuando seleccionas cualquier otra banda TIF que subiste
             archivos_extra = [f for m in meses_seleccionados for f in coleccion_temporal[m]["Otras"] if f.name in mapa_seleccionado]
             arr_extra, b_ex, c_ex, g_ex = procesar_promedio(archivos_extra, 1.0, 0.0, gdf_mascara)
             matriz_final, cmap, unidad = arr_extra, "viridis", "DN"
@@ -331,8 +330,15 @@ if gdf_mascara is not None and mapas_disponibles and meses_seleccionados:
 
         gdf_utm.boundary.plot(ax=ax, color="black", linewidth=0.8, alpha=0.8, zorder=3)
         
+        # Mapa base actualizado a Esri Claro (Canvas) en lugar de CartoDB
         if mapa_base != "Ninguno":
-            proveedor = cx.providers.Esri.WorldTopoMap if mapa_base == "Esri Topográfico (Calles)" else (cx.providers.Esri.WorldImagery if mapa_base == "Esri Satelital" else cx.providers.CartoDB.Positron)
+            if mapa_base == "Esri Topográfico (Calles)":
+                proveedor = cx.providers.Esri.WorldTopoMap
+            elif mapa_base == "Esri Satelital":
+                proveedor = cx.providers.Esri.WorldImagery
+            else:
+                proveedor = cx.providers.Esri.WorldGrayCanvas
+                
             try: cx.add_basemap(ax, crs=crs_actual, source=proveedor, attribution=False, zorder=1)
             except: st.warning("No se pudo cargar la capa base de internet.")
 
